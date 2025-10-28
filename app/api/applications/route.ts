@@ -1,4 +1,3 @@
-// app/api/applications/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { dbConnect } from '@/lib/mongodb';
 import Application from '@/models/Application';
@@ -15,16 +14,15 @@ export async function GET(req: NextRequest) {
   await dbConnect();
 
   const { searchParams } = new URL(req.url);
-  const userId = searchParams.get('userId') || '';
-  const postedBy = searchParams.get('postedBy') || '';
-  const status = searchParams.get('status') || '';
-  const jobId = searchParams.get('jobId') || '';
+  const userId = (searchParams.get('userId') || '').trim();
+  const postedBy = (searchParams.get('postedBy') || '').trim();
+  const status = (searchParams.get('status') || '').trim();
+  const jobId = (searchParams.get('jobId') || '').trim();
 
   const q: any = {};
   if (status) q.status = status;
   if (jobId) q.job = jobId;
 
-  // Admin branch: all applications for jobs posted by this admin
   if (postedBy) {
     const jobs = await Job.find({ postedBy }, { _id: 1 });
     const jobIds = jobs.map(j => j._id);
@@ -38,7 +36,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(apps, { status: 200 });
   }
 
-  // Candidate branch
   if (userId) {
     q.userId = userId;
 
@@ -58,15 +55,25 @@ export async function POST(req: NextRequest) {
   await dbConnect();
 
   const formData = await req.formData();
-  const job = String(formData.get('job') || '');
-  const userId = String(formData.get('userId') || '');
-  const name = String(formData.get('name') || '');
-  const email = String(formData.get('email') || '');
-  const message = String(formData.get('message') || '');
+  const job = String(formData.get('job') || '').trim();
+  const userId = String(formData.get('userId') || '').trim();
+  const name = String(formData.get('name') || '').trim();
+  const email = String(formData.get('email') || '').trim();
+  const message = String(formData.get('message') || '').trim();
   const file = formData.get('resume') as File | null;
 
   if (!job || !userId || !name || !email || !file) {
     return NextResponse.json({ error: 'All fields and resume required' }, { status: 400 });
+  }
+
+  // Optional: size/type guard (e.g., max 10MB and PDF/Doc variants)
+  const maxBytes = 10 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    return NextResponse.json({ error: 'Resume must be under 10MB' }, { status: 400 });
+  }
+  const okTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+  if (!okTypes.includes(file.type)) {
+    return NextResponse.json({ error: 'Resume must be PDF or DOC/DOCX' }, { status: 400 });
   }
 
   const jobExists = await Job.findById(job);
@@ -75,8 +82,9 @@ export async function POST(req: NextRequest) {
   const dup = await Application.findOne({ job, userId });
   if (dup) return NextResponse.json({ error: 'You have already applied for this job' }, { status: 409 });
 
-  // Upload to Vercel Blob (persistent across deployments)
-  const blob = await put(`resumes/${Date.now()}_${file.name}`, file, {
+  // Safer filename (strip unsafe chars)
+  const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+  const blob = await put(`resumes/${Date.now()}_${safeName}`, file, {
     access: 'public',
     addRandomSuffix: true,
   });
@@ -84,9 +92,9 @@ export async function POST(req: NextRequest) {
   const application = await Application.create({
     job,
     userId,
-    name: name.trim(),
-    email: email.trim(),
-    message: message.trim(),
+    name,
+    email,
+    message,
     resumeUrl: blob.url,
     status: 'pending',
   });
@@ -109,7 +117,8 @@ export async function PATCH(req: NextRequest) {
   const appDoc = await Application.findById(applicationId).populate({ path: 'job', select: 'postedBy' });
   if (!appDoc) return NextResponse.json({ error: 'Application not found' }, { status: 404 });
 
-  // TODO: add authorization to ensure caller owns appDoc.job.postedBy
+  // TODO: Authorization: ensure current user owns (appDoc.job as any).postedBy
+
   appDoc.status = status as any;
   await appDoc.save();
 
