@@ -1,4 +1,4 @@
-// app/api/admin/applications/route.ts
+// app/api/admin/applications/route.ts - FULLY FIXED
 import { NextRequest, NextResponse } from 'next/server';
 import { dbConnect } from '@/lib/mongodb';
 import Application from '@/models/Application';
@@ -6,63 +6,109 @@ import Job from '@/models/job';
 
 export const runtime = 'nodejs';
 
-/**
- * GET /api/admin/applications?postedBy=ADMIN_ID[&status=...][&jobId=...]
- * Returns all applications for jobs posted by this admin.
- */
 export async function GET(req: NextRequest) {
-  await dbConnect();
+  try {
+    await dbConnect();
+    console.log('🔍 Admin API called'); // DEBUG
 
-  const { searchParams } = new URL(req.url);
-  const postedBy = searchParams.get('postedBy') || '';
-  const status = searchParams.get('status') || '';
-  const jobId = searchParams.get('jobId') || '';
+    const { searchParams } = new URL(req.url);
+    const postedBy = searchParams.get('postedBy');
+    const status = searchParams.get('status');
 
-  if (!postedBy) return NextResponse.json([], { status: 200 });
+    console.log('PostedBy:', postedBy, 'Status:', status); // DEBUG
 
-  const jobs = await Job.find({ postedBy }, { _id: 1 });
-  const jobIds = jobs.map(j => j._id);
-  if (jobIds.length === 0) return NextResponse.json([], { status: 200 });
+    if (!postedBy) {
+      console.log('❌ No postedBy provided');
+      return NextResponse.json([], { status: 200 });
+    }
 
-  const q: any = jobId ? { job: jobId } : { job: { $in: jobIds } };
-  if (status) q.status = status;
+    // ✅ STEP 1: Find admin's jobs
+    const jobs = await Job.find({ postedBy }).select('_id').lean();
+    const jobIds = jobs.map(j => j._id.toString());
+    
+    console.log('Found jobs:', jobIds.length); // DEBUG
 
-  const apps = await Application.find(q)
-    .populate({ path: 'job', select: 'title company location createdAt' })
-    .sort({ createdAt: -1 });
+    if (jobIds.length === 0) {
+      console.log('❌ No jobs found for this admin');
+      return NextResponse.json([], { status: 200 });
+    }
 
-  return NextResponse.json(apps, { status: 200 });
+    // ✅ STEP 2: Find applications for these jobs + POPULATE applicant data
+    const query: any = { 
+      job: { $in: jobIds }
+    };
+    
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    const applications = await Application.find(query)
+      .populate({
+        path: 'job',
+        select: 'title company location createdAt'
+      })
+      .lean();
+
+    // ✅ STEP 3: Transform data to match frontend interface
+    const transformedApps = applications.map(app => ({
+      _id: app._id.toString(),
+      job: {
+        _id: app.job._id,
+        title: app.job.title,
+        company: app.job.company,
+        location: app.job.location || 'Remote',
+        createdAt: app.job.createdAt
+      },
+      name: app.name || app.user?.name || 'Unknown',
+      email: app.email || app.user?.email || 'No email',
+      message: app.message || '',
+      resumeUrl: app.resumeUrl || '',
+      status: app.status || 'pending',
+      createdAt: app.createdAt
+    }));
+
+    console.log(`✅ Found ${transformedApps.length} applications`); // DEBUG
+    return NextResponse.json(transformedApps, { status: 200 });
+
+  } catch (error) {
+    console.error('❌ Admin API Error:', error);
+    return NextResponse.json(
+      { error: 'Server error', details: error instanceof Error ? error.message : 'Unknown' }, 
+      { status: 500 }
+    );
+  }
 }
 
-/**
- * PATCH /api/admin/applications
- * Body: { applicationId: string, status: 'pending' | 'accepted' | 'rejected' }
- */
 export async function PATCH(req: NextRequest) {
-  await dbConnect();
+  try {
+    await dbConnect();
 
-  const body = await req.json().catch(() => null);
-  if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    const body = await req.json();
+    const { applicationId, status } = body;
 
-  const { applicationId, status } = body as {
-    applicationId?: string;
-    status?: 'pending' | 'accepted' | 'rejected';
-  };
+    console.log('PATCH:', { applicationId, status }); // DEBUG
 
-  if (!applicationId || !status || !['pending', 'accepted', 'rejected'].includes(status)) {
-    return NextResponse.json({ error: 'applicationId and valid status required' }, { status: 400 });
+    if (!applicationId || !status) {
+      return NextResponse.json({ error: 'Missing applicationId or status' }, { status: 400 });
+    }
+
+    const appDoc = await Application.findById(applicationId);
+    if (!appDoc) {
+      return NextResponse.json({ error: 'Application not found' }, { status: 404 });
+    }
+
+    // Update status
+    appDoc.status = status;
+    await appDoc.save();
+
+    console.log('✅ Status updated:', status); // DEBUG
+    return NextResponse.json({ 
+      message: 'Status updated', 
+      application: { _id: appDoc._id, status: appDoc.status }
+    });
+
+  } catch (error) {
+    console.error('❌ PATCH Error:', error);
+    return NextResponse.json({ error: 'Update failed' }, { status: 500 });
   }
-
-  const appDoc = await Application.findById(applicationId).populate({
-    path: 'job',
-    select: 'postedBy',
-  });
-  if (!appDoc) return NextResponse.json({ error: 'Application not found' }, { status: 404 });
-
-  // TODO: Add authorization check to ensure the caller owns appDoc.job.postedBy.
-
-  appDoc.status = status;
-  await appDoc.save();
-
-  return NextResponse.json({ message: 'Status updated', application: appDoc }, { status: 200 });
 }

@@ -8,7 +8,12 @@ const applicationSchema = new Schema(
     email: { type: String, required: true },
     message: String,
     resumeUrl: { type: String, required: true },
-    status: { type: String, default: "pending" },
+    // ✅ FIXED: Proper enum + default
+    status: { 
+      type: String, 
+      enum: ["pending", "accepted", "rejected"], 
+      default: "pending" 
+    },
   },
   { timestamps: true }
 );

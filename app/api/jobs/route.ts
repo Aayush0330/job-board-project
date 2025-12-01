@@ -1,7 +1,8 @@
-// app/api/jobs/route.ts
+// app/api/jobs/route.ts - ✅ FIXED (Auto postedBy + Clerk Auth)
 import { NextRequest, NextResponse } from 'next/server';
 import { dbConnect } from '@/lib/mongodb';
 import Job from '@/models/job';
+import { getAuth } from '@clerk/nextjs/server';
 
 export const runtime = 'nodejs';
 
@@ -72,28 +73,39 @@ export async function GET(req: NextRequest) {
   );
 }
 
-// POST /api/jobs
-// Body: { title, company, location, description, postedBy }
+// ✅ FIXED POST /api/jobs - AUTOMATIC postedBy from Clerk
 export async function POST(req: NextRequest) {
   await dbConnect();
 
   try {
-    const { title, company, location, description, postedBy } = await req.json();
-
-    if (!title?.trim() || !company?.trim() || !location?.trim() || !description?.trim() || !postedBy?.trim()) {
-      return badRequest('All fields including postedBy are required');
+    // ✅ CLERK AUTH - Automatic user ID
+    const { userId } = getAuth(req);
+    
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized - User not logged in' }, { status: 401 });
     }
 
+    const { title, company, location, description } = await req.json();
+
+    // ✅ VALIDATION - postedBy automatic hai
+    if (!title?.trim() || !company?.trim() || !location?.trim() || !description?.trim()) {
+      return badRequest('Title, company, location, and description are required');
+    }
+
+    // ✅ AUTOMATIC postedBy = current logged-in user
     const job = await Job.create({
       title: title.trim(),
       company: company.trim(),
       location: location.trim(),
       description: description.trim(),
-      postedBy: postedBy.trim(), // CRITICAL for admin filtering
+      postedBy: userId, // ← AUTOMATIC! No frontend changes needed
     });
 
+    console.log('✅ Job created:', job._id, 'by user:', userId);
+
     return NextResponse.json(job, { status: 201 });
-  } catch {
+  } catch (error: any) {
+    console.error('❌ Job create error:', error);
     return serverError('Failed to create job');
   }
 }

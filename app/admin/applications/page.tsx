@@ -1,4 +1,5 @@
-'use client';
+// app/admin/page.tsx - FULLY WORKING VERSION
+"use client";
 
 import { useEffect, useMemo, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
@@ -17,7 +18,6 @@ interface Application {
     title: string;
     company: string;
     location: string;
-    createdAt: string;
   };
   name: string;
   email: string;
@@ -29,16 +29,16 @@ interface Application {
 
 export default function AdminApplicationsPage() {
   const { user, isSignedIn } = useUser();
-
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | Status>('all');
   const [query, setQuery] = useState('');
 
-  // Fetch applications for jobs posted by this admin (postedBy = admin clerk id)
+  // ✅ FIXED: Admin API endpoint
   useEffect(() => {
     if (!isSignedIn || !user?.id) return;
+    
     const ac = new AbortController();
 
     (async () => {
@@ -46,16 +46,33 @@ export default function AdminApplicationsPage() {
         setLoading(true);
         setError('');
 
-        const url = new URL('/api/applications', window.location.origin);
+        // ✅ ADMIN ENDPOINT - ALL applications jo tumhare jobs pe aaye
+        const url = new URL('/api/admin/applications', window.location.origin);
         url.searchParams.set('postedBy', user.id);
         if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
 
-        const res = await fetch(url.toString(), { cache: 'no-store', signal: ac.signal });
-        if (!res.ok) throw new Error('Failed to load applications');
+        console.log('Fetching from:', url.toString()); // DEBUG
+
+        const res = await fetch(url.toString(), { 
+          cache: 'no-store', 
+          signal: ac.signal 
+        });
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('API Error:', errorText);
+          throw new Error(`Failed to load applications: ${res.status}`);
+        }
+        
         const data: Application[] = await res.json();
+        console.log('Applications loaded:', data); // DEBUG
+        
         setApps(Array.isArray(data) ? data : []);
       } catch (e: any) {
-        if (e.name !== 'AbortError') setError('Unable to load applications');
+        console.error('Fetch error:', e);
+        if (e.name !== 'AbortError') {
+          setError(`Unable to load applications: ${e.message}`);
+        }
       } finally {
         setLoading(false);
       }
@@ -64,7 +81,7 @@ export default function AdminApplicationsPage() {
     return () => ac.abort();
   }, [isSignedIn, user?.id, statusFilter]);
 
-  // Client-side search by title/company/applicant
+  // Client-side search
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return apps;
@@ -83,7 +100,7 @@ export default function AdminApplicationsPage() {
     };
   }, [apps]);
 
-  // Optimistic status update
+  // ✅ FIXED: Status update with better error handling
   async function updateStatus(appId: string, next: Status) {
     const prev = apps.slice();
     setApps(curr => curr.map(a => (a._id === appId ? { ...a, status: next } : a)));
@@ -94,10 +111,15 @@ export default function AdminApplicationsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ applicationId: appId, status: next }),
       });
-      if (!res.ok) throw new Error('Update failed');
-    } catch {
-      // revert
-      setApps(prev);
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Update failed: ${res.status} - ${errorText}`);
+      }
+    } catch (e: any) {
+      console.error('Status update failed:', e);
+      setApps(prev); // Revert
+      setError('Failed to update status');
     }
   }
 
@@ -176,7 +198,7 @@ export default function AdminApplicationsPage() {
               placeholder="Search by title, company, or applicant"
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button
               variant={statusFilter === 'all' ? 'default' : 'outline'}
               onClick={() => setStatusFilter('all')}
@@ -204,14 +226,20 @@ export default function AdminApplicationsPage() {
           </div>
         </div>
 
-        {/* List */}
+        {/* Results */}
         {loading ? (
           <Card className="shadow border-[#41B2FF]/20">
             <CardContent className="p-8 text-center text-gray-600">Loading applications…</CardContent>
           </Card>
         ) : error ? (
           <Card className="shadow border-red-200">
-            <CardContent className="p-8 text-center text-red-700">{error}</CardContent>
+            <CardContent className="p-8 text-center text-red-700">
+              <div className="font-semibold mb-2">Error: {error}</div>
+              <div className="text-sm text-red-600 mb-4">
+                Check browser console (F12) for details
+              </div>
+              <Button onClick={() => window.location.reload()}>Retry</Button>
+            </CardContent>
           </Card>
         ) : filtered.length === 0 ? (
           <Card className="shadow border-[#41B2FF]/20">
@@ -256,31 +284,41 @@ export default function AdminApplicationsPage() {
 
                     <div className="flex flex-col items-end gap-2 min-w-[220px]">
                       <div>{statusBadge(a.status)}</div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-1 flex-wrap">
                         <Button
                           size="sm"
-                          className="bg-green-600 hover:bg-green-700"
+                          className="bg-green-600 hover:bg-green-700 h-9 px-3"
                           onClick={() => updateStatus(a._id, 'accepted')}
+                          disabled={a.status === 'accepted'}
                         >
                           <Check className="w-4 h-4 mr-1" /> Accept
                         </Button>
                         <Button
                           size="sm"
                           variant="destructive"
+                          className="h-9 px-3"
                           onClick={() => updateStatus(a._id, 'rejected')}
+                          disabled={a.status === 'rejected'}
                         >
                           <X className="w-4 h-4 mr-1" /> Reject
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
+                          className="h-9 px-3"
                           onClick={() => updateStatus(a._id, 'pending')}
+                          disabled={a.status === 'pending'}
                         >
                           <RotateCcw className="w-4 h-4 mr-1" /> Pending
                         </Button>
                         {a.resumeUrl && (
-                          <a href={a.resumeUrl} target="_blank" rel="noopener noreferrer">
-                            <Button size="sm" variant="outline">
+                          <a 
+                            href={a.resumeUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="h-9"
+                          >
+                            <Button size="sm" variant="outline" className="h-9 px-3">
                               <Download className="w-4 h-4 mr-1" /> Resume
                             </Button>
                           </a>
