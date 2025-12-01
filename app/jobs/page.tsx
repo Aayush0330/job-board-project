@@ -14,8 +14,10 @@ interface Job {
   location: string;
   company: string;
   postedBy: string;
+  postedByName?: string;
   createdAt: string;
 }
+
 
 export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([]);
