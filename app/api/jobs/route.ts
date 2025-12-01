@@ -1,8 +1,8 @@
-// app/api/jobs/route.ts - Auto postedBy + postedByName with Clerk
+// app/api/jobs/route.ts - CLEAN (Vercel safe)
 import { NextRequest, NextResponse } from "next/server";
 import { dbConnect } from "@/lib/mongodb";
 import Job from "@/models/job";
-import { getAuth, clerkClient } from "@clerk/nextjs/server"; // ⭐ new import [web:5]
+import { getAuth } from "@clerk/nextjs/server"; // sirf getAuth use ho raha hai [web:15]
 
 export const runtime = "nodejs";
 
@@ -15,10 +15,8 @@ function serverError(msg = "Internal server error") {
 }
 
 // GET /api/jobs
-// Supports:
-// - Single:   /api/jobs?id=<jobId>
-// - Filters:  ?q=search&location=...&company=...&postedBy=...&skip=0&limit=10
-// - Sorted newest first
+// - /api/jobs?id=<jobId>
+// - ?q=search&location=...&company=...&postedBy=...&skip=0&limit=10
 export async function GET(req: NextRequest) {
   await dbConnect();
 
@@ -41,7 +39,7 @@ export async function GET(req: NextRequest) {
   const q = (searchParams.get("q") || "").trim();
   const location = (searchParams.get("location") || "").trim();
   const company = (searchParams.get("company") || "").trim();
-  const postedBy = (searchParams.get("postedBy") || "").trim(); // for admin pages
+  const postedBy = (searchParams.get("postedBy") || "").trim();
   const limit = Math.min(parseInt(searchParams.get("limit") || "10", 10), 50);
   const skip = Math.max(parseInt(searchParams.get("skip") || "0", 10), 0);
 
@@ -74,13 +72,13 @@ export async function GET(req: NextRequest) {
   );
 }
 
-// POST /api/jobs - AUTOMATIC postedBy + postedByName from Clerk
+// POST /api/jobs – postedBy = Clerk userId
 export async function POST(req: NextRequest) {
   await dbConnect();
 
   try {
-    // Clerk auth - current user ID
-    const { userId } = getAuth(req); // [web:5]
+    // Clerk se current userId [web:15]
+    const { userId } = getAuth(req);
     if (!userId) {
       return NextResponse.json(
         { error: "Unauthorized - User not logged in" },
@@ -101,30 +99,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ⭐ Get human name from Clerk to show in UI
-    let postedByName = "Recruiter";
-    try {
-      const clerkUser = await clerkClient.users.getUser(userId); // [web:5]
-      postedByName =
-        clerkUser.fullName ||
-        clerkUser.firstName ||
-        clerkUser.username ||
-        "Recruiter";
-    } catch {
-      // ignore, fallback to default
-    }
-
-    // Automatic postedBy + postedByName
     const job = await Job.create({
       title: title.trim(),
       company: company.trim(),
       location: location.trim(),
       description: description.trim(),
-      postedBy: userId,
-      postedByName, 
+      postedBy: userId, // yahi field dashboard + admin ke liye use hogi
     });
 
-    console.log("✅ Job created:", job._id, "by user:", userId, postedByName);
+    console.log("✅ Job created:", job._id, "by user:", userId);
 
     return NextResponse.json(job, { status: 201 });
   } catch (error: any) {
