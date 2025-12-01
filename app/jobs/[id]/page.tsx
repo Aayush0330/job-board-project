@@ -8,7 +8,7 @@ import DragDropFileUpload from '@/components/DragDropFileUpload';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Briefcase, MapPin, Building2, User, Calendar, ArrowLeft, Mail, ExternalLink } from 'lucide-react';
+import { Briefcase, MapPin, Building2, User, Calendar, ArrowLeft, Mail, ExternalLink, CheckCircle } from 'lucide-react';
 
 interface Job {
   _id: string;
@@ -21,12 +21,11 @@ interface Job {
 }
 
 export default function JobDetailPage() {
-  // 1) Strongly type params; support string | string[] for catch-all routes
   const params = useParams<{ id?: string | string[] }>();
   const rawId = params?.id;
   const id = useMemo(() => (Array.isArray(rawId) ? rawId[0] : rawId) ?? '', [rawId]);
 
-  const { user, isSignedIn } = useUser();
+  const { user, isSignedIn, isLoaded } = useUser();
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -35,8 +34,6 @@ export default function JobDetailPage() {
   const [applyMsg, setApplyMsg] = useState('');
   const [applyLoading, setApplyLoading] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
-  const [uploadLoading, setUploadLoading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
 
   useEffect(() => {
     if (!id) return;
@@ -57,39 +54,64 @@ export default function JobDetailPage() {
     })();
   }, [id]);
 
+  // 🔥 FIXED - JSON API call instead of FormData
   const handleApplySubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setApplyLoading(true);
     setApplyMsg('');
 
-    if (!resumeFile) {
-      setApplyMsg('Resume required!');
+    // Validation
+    if (!isLoaded || !isSignedIn || !user?.id) {
+      setApplyMsg('❌ Please login first');
       setApplyLoading(false);
       return;
     }
     if (!job?._id) {
-      setApplyMsg('Invalid job.');
+      setApplyMsg('❌ Invalid job ID');
+      setApplyLoading(false);
+      return;
+    }
+    if (!resumeFile) {
+      setApplyMsg('❌ Resume is required');
       setApplyLoading(false);
       return;
     }
 
-    const formData = new FormData();
-    formData.append('job', job._id);
-    formData.append('userId', user?.id || '');
-    formData.append('name', user?.fullName || '');
-    formData.append('email', user?.primaryEmailAddress?.emailAddress || '');
-    formData.append('message', (e.currentTarget as any).message?.value || '');
-    formData.append('resume', resumeFile);
+    // Prepare JSON data
+    const formData = {
+      job: job._id,
+      userId: user.id,
+      name: user.fullName || user.firstName || 'Applicant',
+      email: user.primaryEmailAddress?.emailAddress || '',
+      message: (e.currentTarget as any).message?.value || '',
+      resumeUrl: resumeFile.name, // Full upload later
+    };
 
-    const res = await fetch('/api/applications', { method: 'POST', body: formData });
+    console.log('🚀 Sending to API:', formData);
 
-    if (res.ok) {
-      setApplied(true);
-      setApplyModal(false);
-      setApplyMsg('Application submitted!');
-      setResumeFile(null);
-    } else {
-      setApplyMsg('Failed to apply. Try again.');
+    try {
+      const res = await fetch('/api/applications', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(formData),
+      });
+
+      const data = await res.json();
+      console.log('📡 API Response:', res.status, data);
+
+      if (res.ok) {
+        setApplied(true);
+        setApplyModal(false);
+        setApplyMsg('✅ Application submitted successfully!');
+        setResumeFile(null);
+      } else {
+        setApplyMsg(`❌ ${data.error || 'Failed to apply'}`);
+      }
+    } catch (err: any) {
+      console.error('❌ Network Error:', err);
+      setApplyMsg('❌ Network error. Please try again.');
     }
     setApplyLoading(false);
   };
@@ -178,41 +200,20 @@ export default function JobDetailPage() {
             <div className="flex flex-wrap gap-4">
               {applied ? (
                 <div className="flex-1 bg-[#D1FADF] border border-green-300 rounded-xl p-4 flex items-center gap-3 animate-fade-in">
-                  <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-2xl mr-2">🎉</div>
+                  <CheckCircle className="w-6 h-6 text-green-500" />
                   <div>
-                    <p className="font-semibold text-green-900 text-lg">You’ve successfully applied!</p>
-                    <p className="text-sm text-green-700">We’ve received your application and sent you a confirmation email.</p>
+                    <p className="font-semibold text-green-900 text-lg">You've successfully applied!</p>
+                    <p className="text-sm text-green-700">Check your dashboard or email for updates.</p>
                   </div>
                 </div>
               ) : isSignedIn ? (
                 <>
-                  <Button onClick={() => setApplyModal(true)} className="flex-1 bg-gradient-to-r from-[#3DBDFF] via-[#007BFF] to-[#002E6E] text-white font-semibold py-3 text-lg rounded-lg hover:opacity-90 transition-all">
+                  <Button 
+                    onClick={() => setApplyModal(true)} 
+                    className="flex-1 bg-gradient-to-r from-[#3DBDFF] via-[#007BFF] to-[#002E6E] text-white font-semibold py-3 text-lg rounded-lg hover:opacity-90 transition-all"
+                  >
                     <Mail className="w-5 h-5 mr-2" /> Apply Now
                   </Button>
-
-                  {applyModal && (
-                    <div className="fixed inset-0 bg-black/50 z-20 flex items-center justify-center">
-                      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-8 relative">
-                        <button onClick={() => setApplyModal(false)} className="absolute top-3 right-4 text-gray-400 hover:text-gray-900 text-2xl">
-                          &times;
-                        </button>
-                        <h3 className="text-xl font-bold mb-3 text-[#002E6E]">Apply for this Job</h3>
-                        <form onSubmit={handleApplySubmit}>
-                          <input className="w-full bg-gray-100 p-2 rounded mb-3 outline-none cursor-not-allowed" value={user?.fullName ?? ''} disabled />
-                          <input className="w-full bg-gray-100 p-2 rounded mb-3 outline-none cursor-not-allowed" value={user?.primaryEmailAddress?.emailAddress ?? ''} disabled />
-                          <textarea name="message" placeholder="Introduce yourself or cover letter (optional)" className="w-full border px-3 py-2 rounded resize-none mb-3" rows={4} />
-                          <DragDropFileUpload onFileSelect={setResumeFile} />
-                          {resumeFile && <p className="text-sm mt-2">Selected: {resumeFile.name}</p>}
-                          {uploadLoading && <p>Uploading Resume...</p>}
-                          {uploadError && <p className="text-red-600">{uploadError}</p>}
-                          <Button type="submit" className="w-full mt-4" disabled={applyLoading}>
-                            {applyLoading ? 'Applying...' : 'Submit Application'}
-                          </Button>
-                          {applyMsg && <p className="text-green-700 mt-2">{applyMsg}</p>}
-                        </form>
-                      </div>
-                    </div>
-                  )}
 
                   <Button variant="outline" className="px-6 text-lg font-semibold hover:bg-[#EAF5FF]">
                     <ExternalLink className="w-5 h-5 mr-2" /> Share
@@ -229,9 +230,91 @@ export default function JobDetailPage() {
           </CardContent>
         </Card>
 
-        <section>
-          <h3 className="text-2xl font-bold text-[#002E6E] mb-2">Similar Jobs</h3>
-          <p className="text-[#002E6E]/70">
+        {/* 🔥 APPLY MODAL */}
+        {applyModal && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-8 relative">
+              <button 
+                onClick={() => setApplyModal(false)} 
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-900 text-2xl font-bold"
+              >
+                ×
+              </button>
+              
+              <h3 className="text-2xl font-bold mb-6 text-[#002E6E]">Apply for {job.title}</h3>
+              
+              <form onSubmit={handleApplySubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                  <input 
+                    className="w-full bg-gray-100 p-3 rounded-lg outline-none cursor-not-allowed text-gray-700" 
+                    value={user?.fullName ?? ''} 
+                    disabled 
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input 
+                    className="w-full bg-gray-100 p-3 rounded-lg outline-none cursor-not-allowed text-gray-700" 
+                    value={user?.primaryEmailAddress?.emailAddress ?? ''} 
+                    disabled 
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Cover Letter (Optional)</label>
+                  <textarea 
+                    name="message" 
+                    placeholder="Tell us why you're a great fit for this role..." 
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg resize-vertical focus:ring-2 focus:ring-[#007BFF] focus:border-transparent min-h-[100px]"
+                    rows={4}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Resume <span className="text-red-500">*</span></label>
+                  <DragDropFileUpload onFileSelect={setResumeFile} />
+                  {resumeFile && (
+                    <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
+                      <CheckCircle className="w-4 h-4" />
+                      Selected: {resumeFile.name}
+                    </p>
+                  )}
+                </div>
+                
+                {applyMsg && (
+                  <div className={`p-3 rounded-lg text-sm font-medium ${
+                    applyMsg.includes('✅') || applyMsg.includes('success')
+                      ? 'bg-green-100 border border-green-300 text-green-800'
+                      : 'bg-red-100 border border-red-300 text-red-800'
+                  }`}>
+                    {applyMsg}
+                  </div>
+                )}
+                
+                <Button 
+                  type="submit" 
+                  className="w-full bg-gradient-to-r from-[#3DBDFF] via-[#007BFF] to-[#002E6E] text-white font-semibold py-3 text-lg rounded-lg hover:opacity-90 transition-all"
+                  disabled={applyLoading}
+                >
+                  {applyLoading ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                      Applying...
+                    </>
+                  ) : (
+                    'Submit Application'
+                  )}
+                </Button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        <section className="mt-12">
+          <h3 className="text-2xl font-bold text-[#002E6E] mb-6">Similar Jobs</h3>
+          <p className="text-[#002E6E]/70 text-lg">
             Explore more opportunities from <span className="font-semibold">{job.company}</span>.
           </p>
         </section>

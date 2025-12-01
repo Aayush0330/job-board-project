@@ -1,22 +1,44 @@
 import mongoose from 'mongoose'
 
-const MONGODB_URI = process.env.MONGODB_URI as string
-
-if (!MONGODB_URI) {
-  throw new Error('Please add your MongoDB URI to .env.local')
+declare global {
+  var mongoose: any
 }
 
-let isConnected = false
+const MONGODB_URI = process.env.MONGODB_URI!
+
+if (!MONGODB_URI) {
+  throw new Error('Please define MONGODB_URI environment variable')
+}
+
+let cached = global.mongoose
+
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null }
+}
 
 export const dbConnect = async () => {
-  if (isConnected) return
+  if (cached.conn) {
+    return cached.conn
+  }
+
+  if (!cached.promise) {
+    const opts = {
+      dbName: 'jobboard',  // ← Database name add kiya
+      bufferCommands: false,
+    }
+    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
+      return mongoose
+    })
+  }
 
   try {
-    await mongoose.connect(MONGODB_URI)
-    isConnected = true
-    console.log('MongoDB Connected')
-  } catch (error) {
-    console.log('MongoDB connection error')
-    throw error
+    cached.conn = await cached.promise
+    console.log('✅ MongoDB Connected Successfully')
+  } catch (e) {
+    cached.promise = null
+    console.error('❌ MongoDB Connection Error:', e)
+    throw e
   }
+
+  return cached.conn
 }

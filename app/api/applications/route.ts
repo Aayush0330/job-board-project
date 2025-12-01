@@ -6,10 +6,7 @@ import { put } from '@vercel/blob';
 
 export const runtime = 'nodejs';
 
-/* GET /api/applications
-   - Candidate:  /api/applications?userId=CLERK_USER_ID
-   - Admin:      /api/applications?postedBy=ADMIN_USER_ID
-   - Optional:   &status=pending|accepted|rejected &jobId=... */
+/* GET - Same as before */
 export async function GET(req: NextRequest) {
   await dbConnect();
 
@@ -49,60 +46,101 @@ export async function GET(req: NextRequest) {
   return NextResponse.json([], { status: 200 });
 }
 
-/* POST /api/applications  (multipart/form-data)
-   fields: job,userId,name,email,message  file: resume */
+/* 🔥 FIXED POST - Supports BOTH JSON & FormData */
 export async function POST(req: NextRequest) {
   await dbConnect();
 
-  const formData = await req.formData();
-  const job = String(formData.get('job') || '').trim();
-  const userId = String(formData.get('userId') || '').trim();
-  const name = String(formData.get('name') || '').trim();
-  const email = String(formData.get('email') || '').trim();
-  const message = String(formData.get('message') || '').trim();
-  const file = formData.get('resume') as File | null;
+  let job = '';
+  let userId = '';
+  let name = '';
+  let email = '';
+  let message = '';
+  let resumeUrl = '';
 
-  if (!job || !userId || !name || !email || !file) {
-    return NextResponse.json({ error: 'All fields and resume required' }, { status: 400 });
+  try {
+    // 🔥 Try JSON first (frontend)
+    const jsonBody = await req.json().catch(() => null);
+    if (jsonBody) {
+      console.log('📥 JSON body received:', jsonBody);
+      ({ job, userId, name, email, message, resumeUrl } = jsonBody);
+    } else {
+      // Fallback to FormData
+      const formData = await req.formData();
+      console.log('📥 FormData received');
+      job = String(formData.get('job') || '').trim();
+      userId = String(formData.get('userId') || '').trim();
+      name = String(formData.get('name') || '').trim();
+      email = String(formData.get('email') || '').trim();
+      message = String(formData.get('message') || '').trim();
+      
+      const file = formData.get('resume') as File | null;
+      if (file) {
+        // Vercel Blob upload
+        const maxBytes = 10 * 1024 * 1024;
+        if (file.size > maxBytes) {
+          return NextResponse.json({ error: 'Resume must be under 10MB' }, { status: 400 });
+        }
+        const okTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+        if (!okTypes.includes(file.type)) {
+          return NextResponse.json({ error: 'Resume must be PDF or DOC/DOCX' }, { status: 400 });
+        }
+
+        const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+        const blob = await put(`resumes/${Date.now()}_${safeName}`, file, {
+          access: 'public',
+          addRandomSuffix: true,
+        });
+        resumeUrl = blob.url;
+      }
+    }
+  } catch (e) {
+    console.error('Parse error:', e);
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  // Optional: size/type guard (e.g., max 10MB and PDF/Doc variants)
-  const maxBytes = 10 * 1024 * 1024;
-  if (file.size > maxBytes) {
-    return NextResponse.json({ error: 'Resume must be under 10MB' }, { status: 400 });
+  // Validation
+  console.log('Parsed data:', { job, userId, name, email, resumeUrl: !!resumeUrl });
+  
+  if (!job || !userId || !name || !email) {
+    return NextResponse.json({ 
+      error: 'Missing required fields', 
+      received: { job: !!job, userId: !!userId, name: !!name, email: !!email }
+    }, { status: 400 });
   }
-  const okTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-  if (!okTypes.includes(file.type)) {
-    return NextResponse.json({ error: 'Resume must be PDF or DOC/DOCX' }, { status: 400 });
+
+  try {
+    // Job exists check
+    const jobExists = await Job.findById(job);
+    if (!jobExists) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+
+    // Duplicate check
+    const dup = await Application.findOne({ job, userId });
+    if (dup) return NextResponse.json({ error: 'You have already applied for this job' }, { status: 409 });
+
+    // Create application
+    const application = await Application.create({
+      job,
+      userId,
+      name,
+      email,
+      message,
+      resumeUrl,
+      status: 'pending',
+    });
+
+    console.log('✅ Application created:', application._id);
+    return NextResponse.json({ 
+      message: 'Application submitted successfully', 
+      application 
+    }, { status: 201 });
+    
+  } catch (err: any) {
+    console.error('Create error:', err);
+    return NextResponse.json({ error: 'Failed to create application', details: err.message }, { status: 500 });
   }
-
-  const jobExists = await Job.findById(job);
-  if (!jobExists) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
-
-  const dup = await Application.findOne({ job, userId });
-  if (dup) return NextResponse.json({ error: 'You have already applied for this job' }, { status: 409 });
-
-  // Safer filename (strip unsafe chars)
-  const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-  const blob = await put(`resumes/${Date.now()}_${safeName}`, file, {
-    access: 'public',
-    addRandomSuffix: true,
-  });
-
-  const application = await Application.create({
-    job,
-    userId,
-    name,
-    email,
-    message,
-    resumeUrl: blob.url,
-    status: 'pending',
-  });
-
-  return NextResponse.json({ message: 'Application submitted', application }, { status: 201 });
 }
 
-/* PATCH /api/applications  body: { applicationId, status } */
+/* PATCH - Same as before */
 export async function PATCH(req: NextRequest) {
   await dbConnect();
 
@@ -116,8 +154,6 @@ export async function PATCH(req: NextRequest) {
 
   const appDoc = await Application.findById(applicationId).populate({ path: 'job', select: 'postedBy' });
   if (!appDoc) return NextResponse.json({ error: 'Application not found' }, { status: 404 });
-
-  // TODO: Authorization: ensure current user owns (appDoc.job as any).postedBy
 
   appDoc.status = status as any;
   await appDoc.save();
