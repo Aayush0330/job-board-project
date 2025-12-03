@@ -1,28 +1,31 @@
-Job Board Platform
-A modern full‑stack job board where users can browse jobs, apply with a resume, and track their applications from a personal dashboard. Built with Next.js App Router, MongoDB, Clerk authentication and Vercel Blob for file storage.
+🚀 PROJECT_NAME – Full-Stack Job Board Platform
 
-Features
-User authentication with Clerk (sign up, login, protected routes)
+A modern, responsive job board platform where users can browse jobs, apply with a resume, and track their applications from a personalized dashboard. Built with Next.js App Router, MongoDB, Clerk, and Vercel Blob.
 
-Job listing pages with detailed job view
+✨ Features
 
-Apply to jobs with cover letter and resume upload
+🔒 User Authentication: Sign up, login, and protected routes with Clerk
 
-Resume file storage using Vercel Blob
+💼 Job Listings: Browse jobs with detailed views
 
-“My Applications” dashboard with:
+📝 Job Applications: Apply with cover letter & resume upload
 
-Total / accepted / pending counts
+📂 Resume Storage: Secure storage with Vercel Blob
 
-Status badges (pending / accepted / rejected)
+📊 “My Applications” Dashboard:
 
-Download resume button
+Total / Accepted / Pending counts
 
-Admin‑style views for reviewing applications (if you have built them)
+Status badges: Pending / Accepted / Rejected
 
-Fully responsive UI using Tailwind CSS
+Download submitted resumes anytime
 
-Tech Stack
+🛠 Admin-Style Views: Optional dashboard to review applications
+
+📱 Responsive UI: Fully optimized for mobile, tablet, and desktop with Tailwind CSS
+
+🛠 Tech Stack
+
 Frontend: Next.js (App Router), React, TypeScript, Tailwind CSS
 
 Auth: Clerk
