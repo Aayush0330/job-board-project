@@ -1,4 +1,4 @@
-PROJECT_NAME – Job Board Platform
+Job Board Platform
 A modern full‑stack job board where users can browse jobs, apply with a resume, and track their applications from a personal dashboard. Built with Next.js App Router, MongoDB, Clerk authentication and Vercel Blob for file storage.
 
 Features
